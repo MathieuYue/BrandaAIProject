@@ -2,6 +2,13 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from langfuse.callback import CallbackHandler
+langfuse_handler = CallbackHandler(
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+  host="https://us.cloud.langfuse.com", # 🇺🇸 US region
+)
+
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import chain, RunnablePassthrough
 from langchain_openai import OpenAIEmbeddings
@@ -50,7 +57,7 @@ def run():
         query = input("Enter question here: ")
         if query == 'exit':
             break
-        result = chain.invoke(query)
+        result = chain.invoke(input = query, config={"callbacks": [langfuse_handler]})
         print(result)
 
 run()
