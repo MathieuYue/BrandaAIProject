@@ -30,18 +30,44 @@ prompt_template = PromptTemplate.from_template(
 
 llm = ChatOpenAI(model="gpt-3.5-turbo")
 
-@chain
-def retrieve_vectordb(query):
-    qdrant = QdrantVectorStore.from_existing_collection(
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_cohere import CohereRerank
+from langchain_community.llms import Cohere
+
+reranker = CohereRerank(
+    cohere_api_key=os.getenv("COHERE_API_KEY"), model="rerank-english-v3.0"
+)
+
+qdrant = QdrantVectorStore.from_existing_collection(
         embedding=embeddings,
         url=url,
         prefer_grpc=True,
         api_key=os.getenv("QDRANT_CLUSTER_KEY"),
         collection_name="brandeis.edu"
     )
-    results = qdrant.similarity_search(query, k=3)
-    return results
-    
+
+compression_retriever = ContextualCompressionRetriever(
+    base_compressor=reranker, base_retriever=qdrant.as_retriever(search_kwargs={"k": 20})
+)
+@chain
+def retrieve_and_rerank(query):
+    compressed_docs = compression_retriever.get_relevant_documents(query)
+    for doc in compressed_docs:
+        print(doc)
+        print('\n')
+    return compressed_docs
+
+# @chain
+# def retrieve_vectordb(query):
+#     qdrant = QdrantVectorStore.from_existing_collection(
+#         embedding=embeddings,
+#         url=url,
+#         prefer_grpc=True,
+#         api_key=os.getenv("QDRANT_CLUSTER_KEY"),
+#         collection_name="brandeis.edu"
+#     )
+#     results = qdrant.similarity_search(query, k=5)
+#     return results
 
 @chain
 def construct_prompt(passthrough_object):
@@ -50,7 +76,7 @@ def construct_prompt(passthrough_object):
     prompt = prompt_template.format(context=context, question=question)
     return prompt
 
-chain = {"context": retrieve_vectordb, "question": RunnablePassthrough()} | construct_prompt | llm | StrOutputParser()
+chain = {"context": retrieve_and_rerank, "question": RunnablePassthrough()} | construct_prompt | llm | StrOutputParser()
 
 def run():
     while (True):
