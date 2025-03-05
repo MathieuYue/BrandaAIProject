@@ -76,6 +76,8 @@ def construct_prompt(passthrough_object):
     prompt = prompt_template.format(context=context, question=question)
     return prompt
 
+
+
 chain = {"context": retrieve_and_rerank, "question": RunnablePassthrough()} | construct_prompt | llm | StrOutputParser()
 
 def run():
