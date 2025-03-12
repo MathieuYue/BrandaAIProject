@@ -1,0 +1,96 @@
+from openai import OpenAI
+from bs4 import BeautifulSoup
+import re
+import pandas as pd
+
+# Import the cleaned HTML content from sort_html.py
+
+# Set your OpenAI API key
+client = OpenAI(api_key="Open_Ai_key")
+
+# Set Pandas display options
+pd.set_option('display.max_columns', None)  # Show all columns
+pd.set_option('display.max_colwidth', None)  # Show full content of each column
+pd.set_option('display.width', None)  # Auto-detect the display width
+
+# Load the parsed DataFrame from the pickle file
+df = pd.read_pickle('all_courses.pkl')
+
+# Preprocess the data: Extract days, time, and location
+df[['days', 'time', 'location']] = df['time_location'].str.extract(r'([A-Za-z,]+) (.+? [AP]M–.+? [AP]M)(?:\s+(.+))?')
+df['location'] = df['location'].fillna('TBD')  # Fill missing locations with 'TBD'
+
+# Save the DataFrame to a CSV file (optional)
+df.to_csv('courses.csv', index=False)
+print("Course data saved to 'courses.csv'.")
+
+# Query Rewrite Pipeline
+def query_rewrite(query):
+    """Use GPT to rewrite the query."""
+    prompt = f"Rewrite the following query to make it more structured and clear: '{query}'"
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",  # Use GPT-3.5
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=150,
+        temperature=0.7
+    )
+    rewritten_query = response.choices[0].message.content.strip()
+    return rewritten_query
+
+# Retrieve Relevant Data
+def retrieve_data(query):
+    """Retrieve relevant courses based on the query."""
+    # Extract the subject abbreviation from the query
+    subject_abbreviation = None
+    for word in query.split():
+        if word.isupper() and "/" not in word:  # Look for uppercase subject abbreviations
+            subject_abbreviation = word
+            break
+
+    # Filter the DataFrame based on the subject abbreviation
+    filtered_df = df
+    if subject_abbreviation:
+        filtered_df = filtered_df[filtered_df["course_number"].str.contains(subject_abbreviation, case=False)]
+
+    # Additional filters based on days and time
+    if "T and F" in query or "Tuesdays and Fridays" in query:
+        filtered_df = filtered_df[filtered_df["days"].str.contains("T,F", case=False)]
+    if "9:35 AM" in query:
+        filtered_df = filtered_df[filtered_df["time"].str.contains("9:35 AM", case=False)]
+
+    return filtered_df
+
+# Generate a Response
+def generate_response(query, data):
+    """Use GPT to generate a natural language response."""
+    prompt = f"Based on the following data, answer the query: '{query}'\n\nData:\n{data.to_string()}"
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",  # Use GPT-3.5
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=150,
+        temperature=0.7
+    )
+    return response.choices[0].message.content.strip()
+
+# Example Usage
+query = "What ECON classes are on Tuesdays and Fridays at 9:35 AM?"
+
+# Step 1: Rewrite the query
+rewritten_query = query_rewrite(query)
+print("Rewritten Query:", rewritten_query)
+
+# Step 2: Retrieve relevant data
+relevant_data = retrieve_data(rewritten_query)
+print("\nRelevant Data:")
+print(relevant_data)
+
+# Step 3: Generate a response
+response = generate_response(rewritten_query, relevant_data)
+print("\nGenerated Response from data:")
+print(response)
