@@ -1,0 +1,69 @@
+from bs4 import BeautifulSoup
+import pandas as pd
+import requests
+import re
+
+# Set Pandas display options
+pd.set_option('display.max_columns', None)  # Show all columns
+pd.set_option('display.max_colwidth', None)  # Show full content of each column
+pd.set_option('display.width', None)  # Auto-detect the display width
+
+# Base URL pattern
+base_url = 'https://registrar-prod.unet.brandeis.edu/registrar/schedule/classes/2025/Spring/{}/UGRD'
+
+# Initialize an empty list to store all courses
+all_courses = []
+
+# Loop through the pages (100, 200, ..., 7000)
+for number in range(100, 7100, 100):  # Adjust the range as needed
+    url = base_url.format(number)
+    print(f"Fetching data from: {url}")
+
+    # Fetch the HTML content from the website
+    response = requests.get(url)
+    if response.status_code == 200:
+        html_content = response.text
+
+        # Parse the HTML content with BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Find the table containing the course data
+        table = soup.find('table', id='classes-list')
+        if table:
+            # Find all rows in the table
+            rows = table.find_all('tr')
+
+            # Iterate through the rows to extract course data
+            for row in rows:
+                # Skip the header rows (they contain th elements)
+                if row.find('th'):
+                    continue
+
+                # Extract course data from the cells (td elements)
+                cells = row.find_all('td')
+                if len(cells) >= 3:  # Ensure there are enough cells for course data
+                    # Clean up the text by removing extra newlines and spaces
+                    course_number = re.sub(r'\s+', ' ', cells[0].text.strip()).replace('\n', ' ')
+                    course_title = re.sub(r'\s+', ' ', cells[1].text.strip()).replace('\n', ' ')
+                    time_location = re.sub(r'\s+', ' ', cells[2].text.strip()).replace('\n', ' ')
+
+                    # Store course details in a dictionary
+                    all_courses.append({
+                        'course_number': course_number,
+                        'course_title': course_title,
+                        'time_location': time_location,
+                        'url': url  # Optional: Include the URL for reference
+                    })
+        else:
+            print(f"Table with id 'classes-list' not found on the page: {url}")
+    else:
+        print(f"Failed to retrieve the webpage: {url}. Status code: {response.status_code}")
+
+# Convert the list of courses to a Pandas DataFrame
+df = pd.DataFrame(all_courses)
+df.drop_duplicates(inplace=True)  # Remove duplicates
+print(df)
+
+# Save the DataFrame to a CSV file (optional)
+df.to_pickle('all_courses.pkl')
+print("Parsed DataFrame saved to 'all_courses.pkl'.")
