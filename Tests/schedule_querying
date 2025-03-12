@@ -3,8 +3,6 @@ from bs4 import BeautifulSoup
 import re
 import pandas as pd
 
-# Import the cleaned HTML content from sort_html.py
-
 # Set your OpenAI API key
 client = OpenAI(api_key="Open_Ai_key")
 
