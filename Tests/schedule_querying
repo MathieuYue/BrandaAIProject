@@ -1,15 +1,16 @@
+import string
 from openai import OpenAI
-from bs4 import BeautifulSoup
-import re
 import pandas as pd
+from spellchecker import SpellChecker  # For spell correction
+import re
 
 # Set your OpenAI API key
-client = OpenAI(api_key="Open_Ai_key")
+client = OpenAI(api_key="")
 
 # Set Pandas display options
-pd.set_option('display.max_columns', None)  # Show all columns
-pd.set_option('display.max_colwidth', None)  # Show full content of each column
-pd.set_option('display.width', None)  # Auto-detect the display width
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_colwidth', None)
+pd.set_option('display.width', None)
 
 # Load the parsed DataFrame from the pickle file
 df = pd.read_pickle('all_courses.pkl')
@@ -22,51 +23,199 @@ df['location'] = df['location'].fillna('TBD')  # Fill missing locations with 'TB
 df.to_csv('courses.csv', index=False)
 print("Course data saved to 'courses.csv'.")
 
-# Query Rewrite Pipeline
-def query_rewrite(query):
-    """Use GPT to rewrite the query."""
-    prompt = f"Rewrite the following query to make it more structured and clear: '{query}'"
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",  # Use GPT-3.5
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=150,
-        temperature=0.7
-    )
-    rewritten_query = response.choices[0].message.content.strip()
-    return rewritten_query
 
-# Retrieve Relevant Data
-def retrieve_data(query):
-    """Retrieve relevant courses based on the query."""
-    # Extract the subject abbreviation from the query
-    subject_abbreviation = None
-    for word in query.split():
-        if word.isupper() and "/" not in word:  # Look for uppercase subject abbreviations
-            subject_abbreviation = word
+subject_mapping = {
+    "african and african american studies": "AAAS",
+    "african and african american studies and english": "AAAS/ENG",
+    "african and african american studies and fine arts": "AAAS/FA",
+    "african and african american studies and history": "AAAS/HIS",
+    "african and african american studies and sociology": "AAAS/SOC",
+    "african and african american studies and women's, gender, and sexuality studies": "AAAS/WGS",
+    "asian-american pacific islander": "AAPI",
+    "asian-american pacific islander and history": "AAPI/HIS",
+    "asian-american pacific islander and women's, gender, and sexuality studies": "AAPI/WGS",
+    "african and african american studies and asian-american pacific islander": "AAS/AAPI",
+    "american studies": "AMST",
+    "american studies and anthropology": "AMST/ANT",
+    "american studies and english": "AMST/ENG",
+    "american studies and music": "AMST/MUS",
+    "anthropology": "ANTH",
+    "anthropology and women's, gender, and sexuality studies": "ANTH/WGS",
+    "arabic language, literature and culture": "ARBC",
+    "biochemistry and biophysics": "BCBP",
+    "biochemistry": "BCHM",
+    "biology and biochemistry": "BIBC",
+    "biology": "BIOL",
+    "biology": "BIO",
+    "biophysics and structural biology": "BIOP",
+    "biotechnology": "BIOT",
+    "biological physics": "BIPH",
+    "biological science": "BISC",
+    "business": "BUS",
+    "business and economics": "BUS/ECON",
+    "business and finance": "BUS/FIN",
+    "creative arts": "CA",
+    "creativity, the arts and social transformation": "CAST",
+    "chemical biology": "CBIO",
+    "chemistry": "CHEM",
+    "chinese": "CHIN",
+    "chemical science": "CHSC",
+    "classical studies": "CLAS",
+    "classical studies and english": "CLAS/ENG",
+    "classical studies and near eastern and judaic studies": "CLAS/NEJ",
+    "comparative humanities": "COMH",
+    "comparative literature and culture": "COML",
+    "comparative literature and culture and english": "COML/ENG",
+    "comparative literature and culture and humanities": "COML/HUM",
+    "comparative literature and culture and russian studies": "COML/REC",
+    "continuation": "CONT",
+    "computer science": "COSI",
+    "composition seminar": "CSEM",
+    "east asian studies": "EAS",
+    "economics": "ECON",
+    "economics and fine arts": "ECON/FA",
+    "economics and finance": "ECON/FIN",
+    "european cultural studies": "ECS",
+    "european cultural studies/english": "ECS/ENG",
+    "education": "ED",
+    "english": "ENG",
+    "engineering": "ENGR",
+    "environmental studies": "ENVS",
+    "english as a second language": "ESL",
+    "fine arts": "FA",
+    "fine arts/near eastern and judaic studies": "FA/NEJS",
+    "film and visual media studies": "FILM",
+    "finance": "FIN",
+    "french and francophone studies": "FREN",
+    "german and european cultural studies": "GECS",
+    "german studies": "GER",
+    "greek": "GRK",
+    "global studies": "GS",
+    "hebrew language, literature and culture": "HBRW",
+    "health: science, society, and policy": "HIS/HSSP",
+    "hispanic studies": "HISP",
+    "history": "HIST",
+    "history and sociology": "HIST/SOC",
+    "history and women's, gender, and sexuality studies": "HIST/WGS",
+    "history of ideas": "HOID",
+    "hornstein jewish professional leadership program": "HRNS",
+    "hornstein program and heller school": "HRNS/HS",
+    "heller school for social policy and management": "HS",
+    "heller school for social policy and management and politics": "HS/POL",
+    "health: science, society, and policy": "HSSP",
+    "humanities": "HUM",
+    "humanities and university writing seminar": "HUM/UWS",
+    "health, wellness, and life skills": "HWL",
+    "international and global studies": "IGS",
+    "international and global studies and legal studies": "IGS/LGLS",
+    "international and global studies and south asian studies": "IGS/SAS",
+    "independent interdisciplinary major": "IIM",
+    "islamic and middle eastern studies": "IMES",
+    "internship": "INT",
+    "italian studies": "ITAL",
+    "japanese": "JAPN",
+    "journalism": "JOUR",
+    "korean": "KOR",
+    "latin american, caribbean, and latinx studies": "LACLS",
+    "latin": "LAT",
+    "legal studies": "LGLS",
+    "linguistics": "LING",
+    "mathematics": "MATH",
+    "medieval and renaissance studies": "MERS",
+    "music": "MUS",
+    "neuroscience and biology": "NBIO",
+    "near eastern and judaic studies": "NEJS",
+    "neuroscience": "NEUR",
+    "neuroscience and physics": "NPHY",
+    "neuroscience and psychology": "NPSY",
+    "peace, conflict, and coexistence studies": "PAX",
+    "peer assistanship": "PEER",
+    "philosophy": "PHIL",
+    "physical science": "PHSC",
+    "physics": "PHYS",
+    "premedical studies": "PMED",
+    "politics": "POL",
+    "portuguese": "PORT",
+    "psychology": "PSYC",
+    "quantitative biology": "QBIO",
+    "russian and european cultural studies": "RECS",
+    "russian and european cultural studies and theater arts": "RECS/THA",
+    "religious studies": "REL",
+    "religious studies and south asian studies": "REL/SAS",
+    "russian studies": "RUS",
+    "south asian studies": "SAS",
+    "social justice and social policy": "SJSP",
+    "sociology": "SOC",
+    "sexuality and queer studies": "SQS",
+    "student support services program": "SSSP",
+    "theater arts": "THA",
+    "university writing seminar": "UWS",
+    "women's, gender, and sexuality studies": "WGS",
+    "yiddish and east european jewish culture": "YDSH"
+}
+
+def metadata_extraction(query):
+    """Extract metadata (subject, course number, time, days) from the query."""
+    metadata = {
+        "subject": None,
+        "course_number": None,
+        "time": None,
+        "days": None
+    }
+    
+    # Check for full subject names in the query
+    for full_name, abbreviation in subject_mapping.items():
+        if full_name in query.lower():
+            metadata["subject"] = abbreviation
             break
+    
+    # If no full subject name is found, look for abbreviations
+    if not metadata["subject"]:
+        subject_match = re.search(r'\b(BIO|AAAS|AAAS/ENG|AAAS/FA|AAAS/HIS|AAAS/SOC|AAAS/WGS|AAPI|AAPI/HIS|AAPI/WGS|AAS/AAPI|AMST|AMST/ANT|AMST/ENG|AMST/MUS|ANTH|ANTH/WGS|ARBC|BCBP|BCHM|BIBC|BIOL|BIOP|BIOT|BIPH|BISC|BUS|BUS/ECON|BUS/FIN|CA|CAST|CBIO|CHEM|CHIN|CHSC|CLAS|CLAS/ENG|CLAS/NEJ|COMH|COML|COML/ENG|COML/HUM|COML/REC|CONT|COSI|CSEM|EAS|ECON|ECON/FA|ECON/FIN|ECS|ECS/ENG|ED|ENG|ENGR|ENVS|ESL|FA|FA/NEJS|FILM|FIN|FREN|GECS|GER|GRK|GS|HBRW|HIS/HSSP|HISP|HIST|HIST/SOC|HIST/WGS|HOID|HRNS|HRNS/HS|HS|HS/POL|HSSP|HUM|HUM/UWS|HWL|IGS|IGS/LGLS|IGS/SAS|IIM|IMES|INT|ITAL|JAPN|JOUR|KOR|LACLS|LAT|LGLS|LING|MATH|MERS|MUS|NBIO|NEJS|NEUR|NPHY|NPSY|PAX|PEER|PHIL|PHSC|PHYS|PMED|POL|PORT|PSYC|QBIO|RECS|RECS/THA|REL|REL/SAS|RUS|SAS|SJSP|SOC|SQS|SSSP|THA|UWS|WGS|YDSH)\b', query, re.IGNORECASE)
+        if subject_match:
+            metadata["subject"] = subject_match.group().upper()
+    
+    # Extract course number (digits)
+    course_number_match = re.search(r'\b\d{2,4}\b', query)
+    if course_number_match:
+        metadata["course_number"] = course_number_match.group()
+    
+    # Extract time (e.g., "2", "2:20", "215")
+    time_match = re.search(r'\b(\d{1,2})(?::(\d{2}))?\b', query)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2)) if time_match.group(2) else 0
+        
+        # Assume times like "2" refer to PM unless explicitly specified
+        if hour < 12:
+            hour += 12  # Convert to 24-hour format (e.g., 2 -> 14)
+        
+        # Convert to a time range (e.g., 2:00 PM–2:59 PM)
+        start_time = f"{hour % 12}:{minute:02d} {'PM' if hour >= 12 else 'AM'}"
+        end_time = f"{hour % 12}:59 {'PM' if hour >= 12 else 'AM'}"
+        metadata["time"] = f"{start_time}–{end_time}"
+    
+    # Extract days (e.g., "Tuesdays and Fridays")
+    days_mapping = {
+        "monday": "M",
+        "tuesday": "T",
+        "wednesday": "W",
+        "thursday": "Th",
+        "friday": "F"
+    }
+    for day, abbrev in days_mapping.items():
+        if day in query.lower():
+            metadata["days"] = metadata["days"] + "," + abbrev if metadata["days"] else abbrev
+    
+    return metadata
 
-    # Filter the DataFrame based on the subject abbreviation
-    filtered_df = df
-    if subject_abbreviation:
-        filtered_df = filtered_df[filtered_df["course_number"].str.contains(subject_abbreviation, case=False)]
-
-    # Additional filters based on days and time
-    if "T and F" in query or "Tuesdays and Fridays" in query:
-        filtered_df = filtered_df[filtered_df["days"].str.contains("T,F", case=False)]
-    if "9:35 AM" in query:
-        filtered_df = filtered_df[filtered_df["time"].str.contains("9:35 AM", case=False)]
-
-    return filtered_df
-
-# Generate a Response
-def generate_response(query, data):
-    """Use GPT to generate a natural language response."""
-    prompt = f"Based on the following data, answer the query: '{query}'\n\nData:\n{data.to_string()}"
+def rephrase_using_llm(query, metadata):
+    """Rephrase the query using an LLM for context-aware expansion and disambiguation."""
+    # Include the time range in the prompt
+    time_range = metadata.get("time", "a specific time")
+    prompt = f"The user is asking about university courses. Rephrase the following query to make it more structured and clear for metadata filtering. Include the time range '{time_range}' in the response: '{query}'"
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",  # Use GPT-3.5
+        model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt}
@@ -76,19 +225,123 @@ def generate_response(query, data):
     )
     return response.choices[0].message.content.strip()
 
-# Example Usage
-query = "What ECON classes are on Tuesdays and Fridays at 9:35 AM?"
+def synonym_expansion(query):
+    """Expand the query with synonyms for better matching."""
+    synonym_mapping = {
+        "class": ["course", "lecture", "session"],
+        "time": ["schedule", "hour"],
+        "location": ["room", "place", "building"]
+    }
+    expanded_query = query
+    for word, synonyms in synonym_mapping.items():
+        if word in query:
+            expanded_query += " " + " ".join(synonyms)
+    return expanded_query
+abbreviations = {
+    "AAAS", "AAAS/ENG", "AAAS/FA", "AAAS/HIS", "AAAS/SOC", "AAAS/WGS", 
+    "AAPI", "AAPI/HIS", "AAPI/WGS", "AAS/AAPI", "AMST", "AMST/ANT", 
+    "AMST/ENG", "AMST/MUS", "ANTH", "ANTH/WGS", "ARBC", "BCBP", "BCHM", 
+    "BIBC", "BIO","BIOL", "BIOP", "BIOT", "BIPH", "BISC", "BUS", "BUS/ECON", 
+    "BUS/FIN", "CA", "CAST", "CBIO", "CHEM", "CHIN", "CHSC", "CLAS", 
+    "CLAS/ENG", "CLAS/NEJ", "COMH", "COML", "COML/ENG", "COML/HUM", 
+    "COML/REC", "CONT", "COSI", "CSEM", "EAS", "ECON", "ECON/FA", 
+    "ECON/FIN", "ECS", "ECS/ENG", "ED", "ENG", "ENGR", "ENVS", "ESL", 
+    "FA", "FA/NEJS", "FILM", "FIN", "FREN", "GECS", "GER", "GRK", "GS", 
+    "HBRW", "HIS/HSSP", "HISP", "HIST", "HIST/SOC", "HIST/WGS", "HOID", 
+    "HRNS", "HRNS/HS", "HS", "HS/POL", "HSSP", "HUM", "HUM/UWS", "HWL", 
+    "IGS", "IGS/LGLS", "IGS/SAS", "IIM", "IMES", "INT", "ITAL", "JAPN", 
+    "JOUR", "KOR", "LACLS", "LAT", "LGLS", "LING", "MATH", "MERS", "MUS", 
+    "NBIO", "NEJS", "NEUR", "NPHY", "NPSY", "PAX", "PEER", "PHIL", "PHSC", 
+    "PHYS", "PMED", "POL", "PORT", "PSYC", "QBIO", "RECS", "RECS/THA", 
+    "REL", "REL/SAS", "RUS", "SAS", "SJSP", "SOC", "SQS", "SSSP", "THA", 
+    "UWS", "WGS", "YDSH"
+}
+def spell_correction_and_normalization(query):
+    """Correct spelling and normalize the query."""
+    # Normalize: lowercase and remove extra spaces
+    query = " ".join(query.lower().split())
+    
+    # Initialize spell checker
+    spell = SpellChecker()
+    
+    # Remove punctuation from the query
+    translator = str.maketrans("", "", string.punctuation)
+    query_without_punctuation = query.translate(translator)
+    
+    # Correct spelling, but preserve numbers
+    corrected_query = []
+    for word in query_without_punctuation.split():
+        if word.isdigit() or word.upper() in abbreviations:  # Preserve numbers
+            corrected_query.append(word)
+        else:  # Correct misspelled words
+            corrected_word = spell.correction(word)
+            # Ensure the corrected word is not None
+            corrected_query.append(corrected_word if corrected_word is not None else word)
+    
+    # Reattach punctuation (e.g., question marks) to the corrected query
+    corrected_query_with_punctuation = " ".join(corrected_query)
+    if query.endswith("?"):
+        corrected_query_with_punctuation += "?"
+    if query.endswith("!"):
+        corrected_query_with_punctuation += "!"
+    if query.endswith("."):
+        corrected_query_with_punctuation += "."
+    
+    return corrected_query_with_punctuation
 
-# Step 1: Rewrite the query
-rewritten_query = query_rewrite(query)
-print("Rewritten Query:", rewritten_query)
+def query_processing_pipeline(query):
+    """Process the query through the entire pipeline."""
+    # Step 1: Spell correction and normalization
+    query = spell_correction_and_normalization(query)
+    print("After spell correction and normalization:", query)
+
+
+    # Step 2: Metadata extraction
+    metadata = metadata_extraction(query)
+    print("Extracted metadata:", metadata)
+    
+    # Step 3: Rephrase using LLM for context-aware expansion and disambiguation
+    query = rephrase_using_llm(query, metadata)
+    print("After rephrasing using LLM:", query)
+    
+    # Step 4: Synonym expansion
+    query = synonym_expansion(query)
+    print("After synonym expansion:", query)
+    
+    return query, metadata
+
+def retrieve_data(query, metadata):
+    """Retrieve relevant courses based on the query and metadata."""
+    filtered_df = df
+    
+    # Filter by subject
+    if metadata["subject"]:
+        filtered_df = filtered_df[filtered_df["course_number"].str.contains(metadata["subject"], case=False)]
+    
+    # Filter by course number
+    if metadata["course_number"]:
+        filtered_df = filtered_df[filtered_df["course_number"].str.contains(metadata["course_number"], case=False)]
+    
+    # Filter by time
+    if metadata["time"]:
+        start_time, end_time = metadata["time"].split("–")
+        filtered_df = filtered_df[
+            (filtered_df["time"].str.split("–").str[0] >= start_time) &
+            (filtered_df["time"].str.split("–").str[0] <= end_time)
+        ]
+    # Filter by days
+    if metadata["days"]:
+        filtered_df = filtered_df[filtered_df["days"].str.contains(metadata["days"], case=False)]
+    
+    return filtered_df
+
+# Example Usage
+query = "What bio classes start at 3."
+
+# Step 1: Process the query through the pipeline
+processed_query, metadata = query_processing_pipeline(query)
 
 # Step 2: Retrieve relevant data
-relevant_data = retrieve_data(rewritten_query)
+relevant_data = retrieve_data(processed_query, metadata)
 print("\nRelevant Data:")
 print(relevant_data)
-
-# Step 3: Generate a response
-response = generate_response(rewritten_query, relevant_data)
-print("\nGenerated Response from data:")
-print(response)
